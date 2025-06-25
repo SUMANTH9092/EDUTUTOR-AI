@@ -1,0 +1,304 @@
+# EDUTUTOR AI - Complete app.py for Hugging Face Spaces
+# An intelligent AI tutor powered by IBM Granite that provides personalized educational explanations across multiple subjects and difficulty levels.
+
+import gradio as gr
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+import warnings
+warnings.filterwarnings("ignore")
+
+class EduTutorAI:
+    def __init__(self):
+        self.model_name = "ibm-granite/granite-3.3-2b-instruct"
+        self.tokenizer = None
+        self.model = None
+        self.pipe = None
+        self.conversation_history = []
+        
+    def load_model(self):
+        """Load the Granite model and tokenizer"""
+        try:
+            print("Loading EDUTUTOR AI model...")
+            
+            # Load tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name,
+                trust_remote_code=True
+            )
+            
+            # Load model with optimization for deployment
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                device_map="auto" if torch.cuda.is_available() else None,
+                trust_remote_code=True,
+                low_cpu_mem_usage=True
+            )
+            
+            # Create pipeline
+            self.pipe = pipeline(
+                "text-generation",
+                model=self.model,
+                tokenizer=self.tokenizer,
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                device_map="auto" if torch.cuda.is_available() else None
+            )
+            
+            print("✅ Model loaded successfully!")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error loading model: {str(e)}")
+            return False
+    
+    def create_educational_prompt(self, user_question, subject="General", difficulty="Intermediate"):
+        """Create an educational prompt template"""
+        system_prompt = f"""You are EDUTUTOR AI, an expert educational tutor specializing in {subject}. 
+Your role is to:
+1. Provide clear, accurate explanations at {difficulty} level
+2. Break down complex concepts into digestible parts
+3. Use examples and analogies when helpful
+4. Encourage learning through questions
+5. Be patient and supportive
+
+Student Question: {user_question}
+
+Please provide a comprehensive yet accessible explanation:"""
+        
+        return system_prompt
+    
+    def generate_response(self, question, subject, difficulty, max_length=512):
+        """Generate educational response"""
+        if not self.pipe:
+            return "❌ Model not loaded. Please wait for initialization."
+        
+        try:
+            # Create educational prompt
+            prompt = self.create_educational_prompt(question, subject, difficulty)
+            
+            # Generate response
+            response = self.pipe(
+                prompt,
+                max_length=max_length,
+                num_return_sequences=1,
+                temperature=0.7,
+                do_sample=True,
+                pad_token_id=self.tokenizer.eos_token_id,
+                truncation=True
+            )
+            
+            # Extract the generated text
+            full_response = response[0]['generated_text']
+            
+            # Remove the prompt to get only the AI response
+            ai_response = full_response.replace(prompt, "").strip()
+            
+            # Store in conversation history
+            self.conversation_history.append({
+                "question": question,
+                "subject": subject,
+                "difficulty": difficulty,
+                "response": ai_response
+            })
+            
+            return ai_response
+            
+        except Exception as e:
+            return f"❌ Error generating response: {str(e)}"
+    
+    def get_conversation_history(self):
+        """Get formatted conversation history"""
+        if not self.conversation_history:
+            return "No conversation history yet."
+        
+        history = "📚 **EDUTUTOR AI - Learning Session History**\n\n"
+        for i, conv in enumerate(self.conversation_history[-5:], 1):  # Show last 5 conversations
+            history += f"**Session {i}:**\n"
+            history += f"🎯 Subject: {conv['subject']} | Level: {conv['difficulty']}\n"
+            history += f"❓ Question: {conv['question']}\n"
+            history += f"💡 Response: {conv['response'][:200]}...\n\n"
+        
+        return history
+    
+    def clear_history(self):
+        """Clear conversation history"""
+        self.conversation_history = []
+        return "🗑️ Conversation history cleared!"
+
+# Initialize the EduTutor AI
+edututor = EduTutorAI()
+
+# Load model function for Gradio
+def initialize_model():
+    """Initialize the model and return status"""
+    success = edututor.load_model()
+    if success:
+        return "✅ EDUTUTOR AI is ready! You can now start asking questions."
+    else:
+        return "❌ Failed to load model. Please try again."
+
+# Main chat function
+def chat_with_edututor(question, subject, difficulty, max_length):
+    """Main chat interface function"""
+    if not question.strip():
+        return "Please enter a question to get started!"
+    
+    response = edututor.generate_response(question, subject, difficulty, max_length)
+    return response
+
+# Create Gradio interface
+def create_interface():
+    """Create the EDUTUTOR AI Gradio interface"""
+    
+    with gr.Blocks(
+        title="🎓 EDUTUTOR AI - Your Personal Learning Assistant",
+        theme=gr.themes.Soft(),
+        css="""
+        .gradio-container {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .main-header {
+            text-align: center;
+            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        """
+    ) as interface:
+        
+        # Header
+        gr.HTML("""
+        <div class="main-header">
+            <h1>🎓 EDUTUTOR AI</h1>
+            <p>Your Intelligent Educational Tutor powered by IBM Granite 3.3-2B</p>
+            <p><em>Ask questions, learn concepts, and expand your knowledge!</em></p>
+        </div>
+        """)
+        
+        # Model initialization section
+        with gr.Row():
+            with gr.Column():
+                init_button = gr.Button("🚀 Initialize EDUTUTOR AI", variant="primary", size="lg")
+                init_status = gr.Textbox(
+                    label="Initialization Status",
+                    value="Click 'Initialize EDUTUTOR AI' to start",
+                    interactive=False
+                )
+        
+        # Main interface
+        with gr.Row():
+            with gr.Column(scale=2):
+                # Input section
+                with gr.Group():
+                    gr.Markdown("### 📝 Ask Your Question")
+                    question_input = gr.Textbox(
+                        label="Your Question",
+                        placeholder="e.g., Explain quantum physics, How does photosynthesis work?, What is machine learning?",
+                        lines=3
+                    )
+                    
+                    with gr.Row():
+                        subject_dropdown = gr.Dropdown(
+                            choices=[
+                                "General", "Mathematics", "Physics", "Chemistry", 
+                                "Biology", "Computer Science", "History", "Literature",
+                                "Geography", "Economics", "Philosophy"
+                            ],
+                            value="General",
+                            label="Subject Area"
+                        )
+                        
+                        difficulty_dropdown = gr.Dropdown(
+                            choices=["Beginner", "Intermediate", "Advanced"],
+                            value="Intermediate",
+                            label="Difficulty Level"
+                        )
+                    
+                    max_length_slider = gr.Slider(
+                        minimum=100,
+                        maximum=1000,
+                        value=512,
+                        step=50,
+                        label="Response Length (tokens)"
+                    )
+                    
+                    ask_button = gr.Button("🤔 Ask EDUTUTOR AI", variant="primary")
+            
+            with gr.Column(scale=1):
+                # Quick actions
+                with gr.Group():
+                    gr.Markdown("### ⚡ Quick Actions")
+                    history_button = gr.Button("📚 View Learning History")
+                    clear_button = gr.Button("🗑️ Clear History")
+                    
+                    gr.Markdown("### 💡 Tips")
+                    gr.Markdown("""
+                    - Be specific with your questions
+                    - Select appropriate subject and difficulty
+                    - Use follow-up questions for deeper understanding
+                    - Experiment with different difficulty levels
+                    """)
+        
+        # Response section
+        with gr.Row():
+            response_output = gr.Textbox(
+                label="🎓 EDUTUTOR AI Response",
+                lines=15,
+                max_lines=20,
+                interactive=False
+            )
+        
+        # History section
+        with gr.Row():
+            history_output = gr.Textbox(
+                label="📚 Learning Session History",
+                lines=10,
+                interactive=False,
+                visible=False
+            )
+        
+        # Event handlers
+        init_button.click(
+            fn=initialize_model,
+            outputs=init_status
+        )
+        
+        ask_button.click(
+            fn=chat_with_edututor,
+            inputs=[question_input, subject_dropdown, difficulty_dropdown, max_length_slider],
+            outputs=response_output
+        )
+        
+        question_input.submit(
+            fn=chat_with_edututor,
+            inputs=[question_input, subject_dropdown, difficulty_dropdown, max_length_slider],
+            outputs=response_output
+        )
+        
+        history_button.click(
+            fn=edututor.get_conversation_history,
+            outputs=history_output
+        ).then(
+            fn=lambda: gr.update(visible=True),
+            outputs=history_output
+        )
+        
+        clear_button.click(
+            fn=edututor.clear_history,
+            outputs=init_status
+        )
+    
+    return interface
+
+# Launch the application
+if __name__ == "__main__":
+    print("🎓 Starting EDUTUTOR AI...")
+    print("=" * 50)
+    
+    # Create and launch interface
+    demo = create_interface()
+    
+    # Launch for Hugging Face Spaces (simplified)
+    demo.launch()
